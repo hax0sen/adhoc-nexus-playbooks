@@ -41,14 +41,6 @@ This Ansible playbook automates the process of upgrading a Sonatype Nexus Reposi
 
 * **Java:** It is assumed that you have both Java 8 (or 11) and Java 17 installed on the target hosts. The upgrade process will involve switching between these versions.
 * **Ansible:** Version 2.9 or later is required.
-* **Target Hosts:**
-    * An existing installation of Nexus Repository Manager 3 must be present.
-    * The Ansible user on the target host needs `` privileges.
-    * Python 3 must be installed on the target host.
-* **Network:**
-    * The Ansible control machine requires network access to the target host(s).
-    * The target host(s) must have network access to download the Nexus distribution package and the Nexus DB Migrator JAR from Sonatype.
-* **SELinux:** If SELinux is active on the target host, this playbook includes tasks to manage the necessary security context for the Nexus binary.
 
 # Upgrade Guide: OrientDB to H2 and Java Migration
 
