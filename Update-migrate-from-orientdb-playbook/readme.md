@@ -95,31 +95,31 @@ This critical step involves backing up your OrientDB database, executing the dat
 2.  **Stop Nexus Service:**
 
     ```bash
-    sudo systemctl stop nexus
+     systemctl stop nexus
     ```
 
 3.  **Run Database Migrator:** Execute the Nexus DB migrator JAR file. Adjust the memory allocation parameters (`-Xmx`, `-Xms`, `-XX:MaxDirectMemorySize`) based on your server's resources and Sonatype's recommendations. Ensure you are in the directory where the `nexus-db-migrator-3.70.4-02.jar` file is located.
 
     ```bash
-    sudo java -Xmx2703M -Xms2703M -XX:+UseG1GC -XX:MaxDirectMemorySize=2703M -jar nexus-db-migrator-3.70.4-02.jar --migration_type=h2
+     java -Xmx2703M -Xms2703M -XX:+UseG1GC -XX:MaxDirectMemorySize=2703M -jar nexus-db-migrator-3.70.4-02.jar --migration_type=h2
     ```
 
 4.  **Move H2 Database File:** After the migration tool completes successfully, it will generate an `nexus.mv.db` file (and potentially other related files). Copy this file to the designated Nexus data directory. The default location is typically under `/var/nexus/db`.
 
     ```bash
-    sudo cp nexus.mv.db /var/nexus/db
+     cp nexus.mv.db /var/nexus/db
     ```
 
 5.  **Set File Ownership:** Ensure the `nexus` user and group have the correct ownership of the migrated H2 database file.
 
     ```bash
-    sudo chown nexus:nexus /var/nexus/db/nexus.mv.db
+     chown nexus:nexus /var/nexus/db/nexus.mv.db
     ```
 
 6.  **Enable H2 Datastore:** Modify the `nexus.properties` file to instruct Nexus to use the H2 datastore. This file is usually located in `/var/nexus/etc/`.
 
     ```bash
-    sudo nano /var/nexus/etc/nexus.properties
+     vi /var/nexus/etc/nexus.properties
     ```
 
     Add or modify the following line:
@@ -133,13 +133,13 @@ This critical step involves backing up your OrientDB database, executing the dat
 7.  **Start Nexus Service:**
 
     ```bash
-    sudo systemctl start nexus
+     systemctl start nexus
     ```
 
 8.  **Verify Service Status:** Confirm that the Nexus service starts successfully after the database migration.
 
     ```bash
-    sudo systemctl status nexus
+     systemctl status nexus
     ```
 
 ## Step 3: Verify H2 Database Migration
