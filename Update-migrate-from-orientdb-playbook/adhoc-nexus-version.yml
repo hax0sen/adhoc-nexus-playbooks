@@ -103,10 +103,6 @@
         validate_certs: yes
       when: nexus_version == "3.70.4-02"
 
-## following https://help.sonatype.com/en/upgrade-nexus-repository.html guide 
-## diff /opt/nexus-latest/etc/jetty/jetty-https.xml /opt/nexus-3.69.0-02/etc/jetty/jetty-https.xml
-
-
     - name: Setup Nexus data directory
       ansible.builtin.lineinfile:
         dest: "/opt/nexus-latest/bin/nexus.vmoptions"
