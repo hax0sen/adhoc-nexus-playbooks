@@ -1,185 +1,163 @@
----
-- name: Upgrade Nexus to New Version
+- name: Upgrade Nexus to New Version and Migrate to H2 Database
   hosts: nexus-legacy
   become: true
   gather_facts: true
   vars:
-    ansible_python_interpreter: /usr/bin/python3
-    # first run to first migrate to H2 database
-    nexus_version: "3.70.4-02"
-    # second update run to upgrade java to 17 and update nexus version
-#    nexus_version: "3.79.1-04"
-
-    #https://download.sonatype.com/nexus/3/nexus-3.79.1-04-linux-x86_64.tar.gz
-    #https://download.sonatype.com/nexus/3/nexus-3.70.4-02-java8-unix.tar.gz"
-    #https://download.sonatype.com/nexus/3/nexus-3.71.0-06-unix.tar.gz
-    # old version
-    nexus_package: "nexus-{{ nexus_version }}-java8-unix.tar.gz"
-    # new versions
-#    nexus_package: "nexus-{{ nexus_version }}-unix.tar.gz"
-    # latest version
-#    nexus_package: "nexus-{{ nexus_version }}-linux-x86_64.tar.gz"
+    # --- Core Configuration ---
+    nexus_version: "3.70.4-02" # Run this version to update to Latest supported orienbtdb version before migrating to H2
+    #nexus_version: "3.71.0-06" # Run this version to use H2 database with Java 17 support
+    #nexus_version: "3.79.1-04" # Run latest version to use H2 database with Java 17 support possible to go from 3.70.4-02 to 3.79.1-04 directly
     nexus_download_url: "https://download.sonatype.com/nexus/3"
     nexus_download_dir: "/opt"
-    nexus_os_user: nexus
-    nexus_os_group: nexus
+    nexus_os_user: "nexus"
+    nexus_os_group: "nexus"
     nexus_systemd_unit: "/etc/systemd/system/nexus.service"
     nexus_backup_dir: "/var/my-nexus-backup"
+
+    # --- User-defined or derived paths ---
+    nexus_install_dir: "/opt/nexus-{{ nexus_version }}"
+    nexus_latest_symlink: "/opt/nexus-latest"
+    nexus_data_dir: "/var/nexus"
+
+    # --- Derived Variables ---
+    nexus_package: >-
+      {% if nexus_version is version('3.71.0-06', '>=') %}
+        nexus-{{ nexus_version }}-linux-x86_64.tar.gz
+      {% elif nexus_version == '3.70.4-02' %}
+        nexus-{{ nexus_version }}-java8-unix.tar.gz
+      {% else %}
+        nexus-{{ nexus_version }}-unix.tar.gz
+      {% endif %}
+    # Database migration variables
     nexus_migrator_jar: "nexus-db-migrator-{{ nexus_version }}.jar"
     nexus_migrator_url: "https://download.sonatype.com/nexus/nxrm3-migrator"
 
   tasks:
-    - name: Check if Nexus systemd service file exists
-      ansible.builtin.stat:
-        path: "{{ nexus_systemd_unit }}"
-      register: nexus_systemd_service_file
+    - name: Ensure Java Prerequisites
+      when: nexus_version is version('3.71.0-06', '>=')
+      block:
+        - name: Check if Java is installed
+          ansible.builtin.command: java -version
+          register: java_check
+          ignore_errors: true
 
-    - name: Stop Nexus systemd service if running
-      ansible.builtin.systemd:
-        name: nexus.service
-        state: stopped
-      when: nexus_systemd_service_file.stat.exists
+        - name: Fail if Java is not installed
+          ansible.builtin.fail:
+            msg: "Java is not installed on this system."
+          when: java_check.rc != 0
 
-    - name: Download Nexus package
-      ansible.builtin.get_url:
-        url: "{{ nexus_download_url }}/{{ nexus_package }}"
-        dest: "{{ nexus_download_dir }}/{{ nexus_package }}"
-        force: false
-        validate_certs: "{{ nexus_download_ssl_verify | default(omit) }}"
-        owner: nexus
-        group: nexus
-        mode: "0644"
-      register: download_status
-      until: download_status.status_code == 200
-      retries: 5
-      delay: 10
+        - name: Remove OpenJDK 1.8 (if upgrading to Java 17)
+          ansible.builtin.dnf:
+            name: java-1.8.0-openjdk
+            state: absent
 
-    - name: Unpack Nexus package
-      ansible.builtin.unarchive:
-        src: "{{ nexus_download_dir }}/{{ nexus_package }}"
-        dest: "/opt"
-        creates: "/opt/nexus-{{ nexus_version }}"
-        copy: false
-        mode: "0755"
+        - name: Install OpenJDK 17 (if required)
+          ansible.builtin.dnf:
+            name: java-17-openjdk
+            state: present
+      rescue:
+        - name: Java prerequisite failure
+          ansible.builtin.debug:
+            msg: "Java installation or validation failed."
 
-    - name: Set correct permissions on Nexus install directory
-      ansible.builtin.file:
-        path: "/opt/nexus-{{ nexus_version }}"
-        recurse: true
-        mode: u=rwX,g=rX,o=rX
+    - name: Manage Nexus Service and Download and Unpack Nexus
+      block:
+        - name: Check if Nexus systemd service file exists
+          ansible.builtin.stat:
+            path: "{{ nexus_systemd_unit }}"
+          register: nexus_systemd_service_file
 
-    - name: Set SELinux context on nexus binary (if SELinux enabled)
-      community.general.sefcontext:
-        target: "/opt/nexus-{{ nexus_version }}/bin/nexus"
-        setype: bin_t
-        state: present
-      when: ansible_selinux.status is defined and ansible_selinux.status == "enabled"
+        - name: Stop Nexus systemd service if running
+          ansible.builtin.systemd:
+            name: nexus.service
+            state: stopped
+          when: nexus_systemd_service_file.stat.exists
 
-    - name: Update symlink to nexus-latest
-      ansible.builtin.file:
-        path: "/opt/nexus-latest"
-        src: "/opt/nexus-{{ nexus_version }}"
-        state: link
-        owner: "{{ nexus_os_user }}"
-        group: "{{ nexus_os_group }}"
-        follow: false
+        - name: Download Nexus package
+          ansible.builtin.get_url:
+            url: "{{ nexus_download_url }}/{{ nexus_package }}"
+            dest: "{{ nexus_download_dir }}/{{ nexus_package }}"
+            force: false
+            validate_certs: "{{ nexus_download_ssl_verify | default(omit) }}"
+            owner: "{{ nexus_os_user }}"
+            group: "{{ nexus_os_group }}"
+            mode: "0644"
+          register: download_status
+          until: download_status.status_code == 200
+          retries: 5
+          delay: 10
 
-    - name: Ensure backup directory exists
-      ansible.builtin.file:
-        path: "{{ nexus_backup_dir }}"
-        state: directory
-        owner: root
-        group: root
-        mode: "0755"
+        - name: Unpack Nexus package
+          ansible.builtin.unarchive:
+            src: "{{ nexus_download_dir }}/{{ nexus_package }}"
+            dest: "/opt"
+            creates: "{{ nexus_install_dir }}"
+            copy: false
+            mode: "0755"
+
+        - name: Set permissions on Nexus install directory
+          ansible.builtin.file:
+            path: "{{ nexus_install_dir }}"
+            recurse: true
+            mode: "u=rwX,g=rX,o=rX"
+
+        - name: Set SELinux context on nexus binary (if enabled)
+          community.general.sefcontext:
+            target: "{{ nexus_install_dir }}/bin/nexus"
+            setype: bin_t
+            state: present
+          when: ansible_selinux.status is defined and ansible_selinux.status == "enabled"
+
+        - name: Update symlink to nexus-latest
+          ansible.builtin.file:
+            path: "{{ nexus_latest_symlink }}"
+            src: "{{ nexus_install_dir }}"
+            state: link
+            owner: "{{ nexus_os_user }}"
+            group: "{{ nexus_os_group }}"
+            follow: false
+      rescue:
+        - name: Nexus download or unpack or permissions failure
+          ansible.builtin.debug:
+              msg: "Download or unpack of Nexus faile."
+
+    - name: Configure Nexus VM Options
+      block:
+        - name: Set VM options
+          ansible.builtin.lineinfile:
+            path: "{{ nexus_latest_symlink }}/bin/nexus.vmoptions"
+            regexp: "{{ item.regexp }}"
+            line: "{{ item.line }}"
+            state: present
+          loop:
+            - { regexp: '^-Dkaraf.data=.*', line: '-Dkaraf.data={{ nexus_data_dir }}' }
+            - { regexp: '^-XX:LogFile=.*', line: '-XX:LogFile=../sonatype-work/nexus3/log/jvm.log' }
+            - { regexp: '^-Dkaraf.log=.*', line: '-Dkaraf.log={{ nexus_data_dir }}/log' }
+            - { regexp: '^-Duser.timezone=.*', line: '-Duser.timezone=UTC' }
+            - { regexp: '^-Djava.io.tmpdir=.*', line: '-Djava.io.tmpdir={{ nexus_data_dir }}-tmp' }
+            - { regexp: '^-Xms.*', line: '-Xms2703m' }
+            - { regexp: '^-Xmx.*', line: '-Xmx2703m' }
+            - { regexp: '^-XX:MaxDirectMemorySize=.*', line: '-XX:MaxDirectMemorySize=2703m' }
+
+    - name: Prepare for H2 Migration (if applicable) # Manually backup fist via gui and save to backup dir {{ nexus_backup_dir }}
       when: nexus_version == "3.70.4-02"
+      block:
+        - name: Ensure backup directory exists
+          ansible.builtin.file:
+            path: "{{ nexus_backup_dir }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0755"
 
-    - name: Download Nexus DB Migrator JAR
-      ansible.builtin.get_url:
-        url: "{{ nexus_migrator_url }}/{{ nexus_migrator_jar }}"
-        dest: "{{ nexus_backup_dir }}/{{ nexus_migrator_jar }}"
-        mode: "0644"
-        owner: root
-        group: root
-        validate_certs: yes
-      when: nexus_version == "3.70.4-02"
-
-    - name: Setup Nexus data directory
-      ansible.builtin.lineinfile:
-        dest: "/opt/nexus-latest/bin/nexus.vmoptions"
-        regexp: ^-Dkaraf.data=.*
-        line: -Dkaraf.data=/var/nexus
-        state: present
-
-    - name: Setup JVM logfile directory
-      ansible.builtin.lineinfile:
-        dest: "/opt/nexus-latest/bin/nexus.vmoptions"
-        regexp: ^-XX:LogFile=.*
-        line: -XX:LogFile=../sonatype-work/nexus3/log/jvm.log
-
-    - name: Setup Karaf log directory
-      ansible.builtin.lineinfile:
-        dest: "/opt/nexus-latest/bin/nexus.vmoptions"
-        regexp: ^-Dkaraf.log=.*
-        line: -Dkaraf.log=/var/nexus/log
-
-    - name: Setup Nexus default timezone
-      ansible.builtin.lineinfile:
-        dest: "/opt/nexus-latest/bin/nexus.vmoptions"
-        regexp: ^-Duser.timezone=.*
-        line: -Duser.timezone=UTC
-
-    - name: Setup Nexus temporary directory
-      ansible.builtin.lineinfile:
-        dest: "/opt/nexus-latest/bin/nexus.vmoptions"
-        regexp: ^-Djava.io.tmpdir=.*
-        line: -Djava.io.tmpdir=/var/nexus-tmp
-
-    - name: Setup Nexus JVM min heap size
-      ansible.builtin.lineinfile:
-        dest: "/opt/nexus-latest/bin/nexus.vmoptions"
-        regexp: ^-Xms.*
-        line: -Xms2703m
-
-    - name: Setup Nexus JVM max heap size
-      ansible.builtin.lineinfile:
-        dest: "/opt/nexus-latest/bin/nexus.vmoptions"
-        regexp: ^-Xmx.*
-        line: -Xmx2703m
-
-    - name: Setup Nexus JVM max direct memory
-      ansible.builtin.lineinfile:
-        dest: "/opt/nexus-latest/bin/nexus.vmoptions"
-        regexp: ^-XX:MaxDirectMemorySize=.*
-        line: -XX:MaxDirectMemorySize=2703m
-
-## only run this if you want to change JAVA version 
-    # - name: Remove OpenJDK 1.8
-    #   ansible.builtin.yum:
-    #     name: java-1.8.0-openjdk
-    #     state: absent
-
-    # - name: Install OpenJDK 17
-    #   ansible.builtin.yum:
-    #     name:
-    #       - java-17-openjdk
-    #       - java-17-openjdk-devel
-    #     state: present
-
-    # - name: Ensure Java 17 is the default (optional)
-    #   ansible.builtin.command: alternatives --set java /usr/lib/jvm/java-17-openjdk-*/bin/java
-    #   args:
-    #     warn: false
-
-# - name: Setup additional and custom vm options if present (or remove them if none)
-#   vars:
-#     options: "{{ nexus_custom_jvm_settings | d([]) }}"
-#   ansible.builtin.blockinfile:
-#     path: "/opt/nexus-latest/bin/nexus.vmoptions"
-#     marker: "# {mark} - Custom nexus settings managed by ansible"
-#     block: "-{{ options | join('\n-') }}"
-#     state: "{{ 'present' if options | length > 0 else 'absent' }}" # noqa args[module]
-
-
-## START NEXUS VIA CLI
-
-## CLEANUP OLD FOLDERS AND tar file 
+        - name: Download Nexus DB Migrator JAR
+          ansible.builtin.get_url:
+            url: "{{ nexus_migrator_url }}/{{ nexus_migrator_jar }}"
+            dest: "{{ nexus_backup_dir }}/{{ nexus_migrator_jar }}"
+            mode: "0644"
+            owner: root
+            group: root
+            validate_certs: yes
+    # Placeholder for starting Nexus and cleanup
+    # - name: Start Nexus service. to avoid issue we skip this step see readme file for more details
+    # - name: Clean up old directories/files. to avoid issue we skip this step see readme file for more details
