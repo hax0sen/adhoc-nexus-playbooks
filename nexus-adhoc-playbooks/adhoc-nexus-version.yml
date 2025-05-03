@@ -7,30 +7,21 @@
     nexus_version: "3.70.4-02" # Run this version to update to Latest supported orienbtdb version before migrating to H2
     #nexus_version: "3.71.0-06" # Run this version to use H2 database with Java 17 support
     #nexus_version: "3.79.1-04" # Run latest version to use H2 database with Java 17 support possible to go from 3.70.4-02 to 3.79.1-04 directly
+    #nexus_package: "nexus-{{ nexus_version }}-linux-x86_64.tar.gz"
+    nexus_package: "nexus-{{ nexus_version }}-java8-unix.tar.gz" # old version
+    #nexus_package: "nexus-{{ nexus_version }}-linux-x86_64.tar.gz" 3.71.0-06 and above version url
+    #nexus_package: "nexus-{{ nexus_version }}-unix.tar.gz" # latest versions url  
+    
     nexus_download_url: "https://download.sonatype.com/nexus/3"
     nexus_download_dir: "/opt"
     nexus_os_user: "nexus"
     nexus_os_group: "nexus"
     nexus_systemd_unit: "/etc/systemd/system/nexus.service"
-    nexus_backup_dir: "/var/my-nexus-backup"
 
     # --- User-defined or derived paths ---
     nexus_install_dir: "/opt/nexus-{{ nexus_version }}"
     nexus_latest_symlink: "/opt/nexus-latest"
     nexus_data_dir: "/var/nexus"
-
-    # --- Derived Variables ---
-    nexus_package: >-
-      {% if nexus_version is version('3.71.0-06', '>=') %}
-        nexus-{{ nexus_version }}-linux-x86_64.tar.gz
-      {% elif nexus_version == '3.70.4-02' %}
-        nexus-{{ nexus_version }}-java8-unix.tar.gz
-      {% else %}
-        nexus-{{ nexus_version }}-unix.tar.gz
-      {% endif %}
-    # Database migration variables
-    nexus_migrator_jar: "nexus-db-migrator-{{ nexus_version }}.jar"
-    nexus_migrator_url: "https://download.sonatype.com/nexus/nxrm3-migrator"
 
   tasks:
     - name: Ensure Java Prerequisites
@@ -73,6 +64,17 @@
             state: stopped
           when: nexus_systemd_service_file.stat.exists
 
+        - name: Check Nexus package URL availability
+          ansible.builtin.uri:
+            url: "{{ nexus_download_url }}/{{ nexus_package }}"
+            method: HEAD
+            status_code: 200
+            return_content: no
+          register: download_check
+          retries: 5
+          delay: 10
+          until: download_check.status == 200
+
         - name: Download Nexus package
           ansible.builtin.get_url:
             url: "{{ nexus_download_url }}/{{ nexus_package }}"
@@ -82,10 +84,7 @@
             owner: "{{ nexus_os_user }}"
             group: "{{ nexus_os_group }}"
             mode: "0644"
-          register: download_status
-          until: download_status.status_code == 200
-          retries: 5
-          delay: 10
+          when: download_check is defined and download_check.status == 200
 
         - name: Unpack Nexus package
           ansible.builtin.unarchive:
@@ -94,6 +93,7 @@
             creates: "{{ nexus_install_dir }}"
             copy: false
             mode: "0755"
+          when: download_check is defined and download_check.status == 200
 
         - name: Set permissions on Nexus install directory
           ansible.builtin.file:
@@ -119,7 +119,7 @@
       rescue:
         - name: Nexus download or unpack or permissions failure
           ansible.builtin.debug:
-              msg: "Download or unpack of Nexus faile."
+              msg: "Download or unpack of Nexus failed."
 
     - name: Configure Nexus VM Options
       block:
@@ -139,25 +139,11 @@
             - { regexp: '^-Xmx.*', line: '-Xmx2703m' }
             - { regexp: '^-XX:MaxDirectMemorySize=.*', line: '-XX:MaxDirectMemorySize=2703m' }
 
-    - name: Prepare for H2 Migration (if applicable) # Manually backup fist via gui and save to backup dir {{ nexus_backup_dir }}
-      when: nexus_version == "3.70.4-02"
-      block:
-        - name: Ensure backup directory exists
-          ansible.builtin.file:
-            path: "{{ nexus_backup_dir }}"
-            state: directory
-            owner: root
-            group: root
-            mode: "0755"
-
-        - name: Download Nexus DB Migrator JAR
-          ansible.builtin.get_url:
-            url: "{{ nexus_migrator_url }}/{{ nexus_migrator_jar }}"
-            dest: "{{ nexus_backup_dir }}/{{ nexus_migrator_jar }}"
-            mode: "0644"
-            owner: root
-            group: root
-            validate_certs: yes
+    # start nexus service after migration
+    - name: Start Nexus systemd service
+      ansible.builtin.systemd:
+        name: nexus.service
+        state: started
+      when: nexus_systemd_service_file.stat.exists
     # Placeholder for starting Nexus and cleanup
-    # - name: Start Nexus service. to avoid issue we skip this step see readme file for more details
     # - name: Clean up old directories/files. to avoid issue we skip this step see readme file for more details

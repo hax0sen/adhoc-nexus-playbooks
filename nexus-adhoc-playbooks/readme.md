@@ -92,7 +92,7 @@ This critical step involves backing up your OrientDB database, executing the dat
     * Look for the "Export Database for backup" task and run it.
     * Download the generated backup file to a secure location. e.g. nexus_backup_dir `/var/my-nexus-backup`.
 
-2.  **Stop Nexus Service:**
+2.  **Run `adhoc-migrate-orientdb-database.yml`  playbook or do it manually, Stop Nexus Service:**
 
     ```bash
      systemctl stop nexus
