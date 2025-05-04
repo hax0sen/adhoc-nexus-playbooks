@@ -55,7 +55,7 @@ For in-depth information, please consult the official Sonatype documentation:
 
 Before initiating the migration to H2 and Java 17, it's crucial to first upgrade to the most recent Nexus Repository version that still supports your current database (OrientDB) and Java version (8 or 11). This staged approach ensures a more stable transition.
 
-1.  **Configure Ansible Variables:** Modify the `vars` file associated with your Ansible playbook (e.g., `upgrade_vars.yml`). Set the following variables to target the last OrientDB-compatible Nexus version:
+1.  **Configure Ansible Variables:** Modify the `vars` file associated with your Ansible playbook. Set the following variables to target the last OrientDB-compatible Nexus version:
 
     ```yaml
     nexus_version: "3.70.4-02"
@@ -92,13 +92,13 @@ This critical step involves backing up your OrientDB database, executing the dat
     * Look for the "Export Database for backup" task and run it.
     * Download the generated backup file to a secure location. e.g. nexus_backup_dir `/var/my-nexus-backup`.
 
-2.  **Run `adhoc-migrate-orientdb-database.yml`  playbook or do it manually, Stop Nexus Service:**
+2.  **Run `adhoc-migrate-orientdb-database.yml`  playbook or do it manually by following below guide, Stop Nexus Service:**
 
     ```bash
      systemctl stop nexus
     ```
 
-3.  **Run Database Migrator:** Execute the Nexus DB migrator JAR file. Adjust the memory allocation parameters (`-Xmx`, `-Xms`, `-XX:MaxDirectMemorySize`) based on your server's resources and Sonatype's recommendations. Ensure you are in the directory where the `nexus-db-migrator-3.70.4-02.jar` file is located.
+3.  **Run Database Migrator:** Download Nexus DB migrator JAR file. Execute the Nexus DB migrator JAR file. Adjust the memory allocation parameters (`-Xmx`, `-Xms`, `-XX:MaxDirectMemorySize`) based on your server's resources and Sonatype's recommendations. Ensure you are in the directory where the `nexus-db-migrator-3.70.4-02.jar` file is located.
 
     ```bash
      java -Xmx2703M -Xms2703M -XX:+UseG1GC -XX:MaxDirectMemorySize=2703M -jar nexus-db-migrator-3.70.4-02.jar --migration_type=h2

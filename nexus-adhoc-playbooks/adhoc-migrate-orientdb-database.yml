@@ -4,7 +4,7 @@
   gather_facts: true
   vars:
     # --- Core Configuration ---
-    nexus_version: "3.70.4-02" # Run this version to update to Latest supported orienbtdb version before migrating to H2
+    nexus_version: "3.70.4-02" # Ensure to you run latest supported orientdb version before migrating to H2
     nexus_systemd_unit: "/etc/systemd/system/nexus.service"
     nexus_backup_dir: "/var/my-nexus-backup"
     nexus_data_dir: "/var/nexus"
