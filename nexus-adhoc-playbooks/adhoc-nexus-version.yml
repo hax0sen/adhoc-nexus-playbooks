@@ -1,4 +1,4 @@
-- name: Upgrade Nexus to New Version and Migrate to H2 Database
+- name: Upgrade Nexus to New Version
   hosts: nexus-legacy
   become: true
   gather_facts: true
