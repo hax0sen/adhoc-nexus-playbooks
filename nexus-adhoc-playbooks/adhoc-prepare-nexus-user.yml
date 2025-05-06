@@ -1,0 +1,83 @@
+- name: Fixs uid and gid change permissions for Nexus files and directories
+  hosts: nexus-legacy
+  become: true
+  gather_facts: true
+  vars:
+    nexus_version: "3.79.1-04"  # Make this a variable, change as needed
+  tasks:
+    - name: Check if Nexus systemd service file exists
+      ansible.builtin.stat:
+        path: /etc/systemd/system/nexus.service
+      register: nexus_systemd_service_file
+
+    - name: Stop Nexus systemd service if running
+      ansible.builtin.systemd:
+        name: nexus.service
+        state: stopped
+      when: nexus_systemd_service_file.stat.exists
+
+    - name: Change Nexus user UID and GID
+      ansible.builtin.user:
+        name: nexus
+        uid: 200
+        home: /home/nexus # Ensure home directory is set
+
+    - name: Ensure Nexus user group exists
+      group:
+        name: nexus
+        gid: 200
+
+    - name: Change ownership of Nexus directories and files
+      file:
+        path: "{{ item }}"
+        owner: nexus
+        group: nexus
+        state: directory
+        recurse: yes
+      with_items:
+        - /home/nexus
+        - /opt/nexus-{{ nexus_version | regex_replace('-.*','') }}"
+        - /opt/sonatype-work
+        - /var/nexus
+        - /var/nexus-tmp
+        - /var/my-nexus-backup"
+        - /var/nexus-backup
+
+    - name: Change ownership and update symlink nexus-latest
+      ansible.builtin.file:
+        path: "/opt/nexus-latest"
+        src: "/opt/nexus-{{ nexus_version }}"
+        owner: nexus
+        group: nexus
+        state: link
+        follow: false
+
+    - name: Start Nexus systemd service
+      ansible.builtin.systemd:
+        name: nexus.service
+        state: started
+      when: nexus_systemd_service_file.stat.exists
+
+##
+    # - name: Update Nexus systemd service file
+    #   template:
+    #     src: "nexus.service.j2"  #  template file
+    #     dest: "/etc/systemd/system/{{ nexus_service_name }}.service"
+    #   notify:
+    #     - Restart Nexus service
+
+#[Unit]
+# Description=nexus service
+# After=network.target
+
+# [Service]
+# Type=forking
+# LimitNOFILE=65536
+# ExecStart=/opt/nexus-latest/bin/nexus start
+# ExecStop=/opt/nexus-latest/bin/nexus stop
+# User=nexus
+# Group=nexus
+# Restart=on-abort
+
+# [Install]
+# WantedBy=multi-user.target
